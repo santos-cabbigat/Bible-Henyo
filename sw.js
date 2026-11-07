@@ -1,5 +1,5 @@
-const cacheName = 'bible-henyo-v3';
-const assets = ['./', './index.html', './style.css', './app.js', './words.js',
+const cacheName = 'bible-henyo-v4';
+const assets = ['./', './index.html', './style.css', './app.js', './words.js', './pairing.js',
   './manifest.webmanifest', './icon.svg', './icon.png', './icon-512.png',
   './Bible-Henyo-Word-List.pdf'];
 self.addEventListener('install', event => {
