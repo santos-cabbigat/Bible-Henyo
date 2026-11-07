@@ -26,16 +26,66 @@ function orientationAngle(event) {
 }
 function onOrientation(e){const v=orientationAngle(e);if(v===null)return;state.angle=v;state.sensorOK=true;if(state.phase==='game'&&state.neutral===null)state.neutral=v;if(state.phase==='tutorial')onTutorialMotion(v);else if(state.phase==='game'&&state.control==='tilt'&&!state.paused)onGameMotion(v);}
 function delta(){if(state.angle===null||state.neutral===null)return null;let d=state.angle-state.neutral;while(d>180)d-=360;while(d< -180)d+=360;return d;}
-function gestureOf(d){const threshold=Number($('threshold').value);const signed=$('reverse-tilt').checked?-d:d;return signed >=threshold?'correct':signed<=-threshold?'pass':null;}
+function gestureOf(deltaAngle, reverse = $('reverse-tilt').checked) {
+  const threshold = Number($('threshold').value);
+  const upward = reverse ? deltaAngle : -deltaAngle;
+  if (upward >= threshold) return 'correct';
+  if (upward <= -threshold) return 'pass';
+  return null;
+}
+
 function onGameMotion(){const d=delta();if(d===null)return;const gesture=gestureOf(d);if(Math.abs(d)<11){state.armed=true;state.gestureDir=null;msg('READY · TILT TO ANSWER');return}if(!state.armed){msg('RETURN TO NEUTRAL');return}if(!gesture){state.gestureDir=null;return}if(gesture!==state.gestureDir){state.gestureDir=gesture;state.gestureSince=Date.now();return}if(Date.now()-state.gestureSince>=220){state.armed=false;transition(gesture,'tilt')}}
-function onTutorialMotion(){const d=delta();if(d===null)return;if(state.trialStep===0){$('trial-sensor').textContent='Sensor active · angle '+Math.round(state.angle)+'°';return}if(Math.abs(d)<11){state.armed=true;$('trial-sensor').textContent='Neutral detected — ready';return}if(!state.armed){$('trial-sensor').textContent='Return to your calibrated position';return}const g=gestureOf(d);if(g===state.trialTarget){if(state.gestureDir!==g){state.gestureDir=g;state.gestureSince=Date.now()}else if(Date.now()-state.gestureSince>250){state.armed=false;trialAction(g)}}else{state.gestureDir=null;$('trial-sensor').textContent=g?'Try the other direction':'Move farther to tilt'}}
+let practiceReverse = null;
+
+function onTutorialMotion() {
+  const step = state.trialStep;
+  if (step === 0) {
+    $('trial-sensor').textContent = 'Sensor active · angle ' + Math.round(state.angle) + '°';
+    return;
+  }
+  const angle = delta();
+  if (angle === null || step > 2) return;
+  const status = $('trial-sensor');
+  if (Math.abs(angle) < 11) {
+    state.armed = true;
+    state.gestureDir = null;
+    status.textContent = 'Neutral detected — ready';
+    return;
+  }
+  if (!state.armed) {
+    status.textContent = 'Return to your calibrated position';
+    return;
+  }
+  // In the first exercise, the player demonstrates what UP means on this phone.
+  const reverse = step === 1 ? angle > 0 : practiceReverse ?? $('reverse-tilt').checked;
+  const gesture = gestureOf(angle, reverse);
+  if (gesture !== state.trialTarget) {
+    state.gestureDir = null;
+    status.textContent = gesture ? 'Try the other direction' : 'Move farther to tilt';
+    return;
+  }
+  const direction = Math.sign(angle);
+  if (direction !== state.gestureDir) {
+    state.gestureDir = direction;
+    state.gestureSince = Date.now();
+    return;
+  }
+  if (Date.now() - state.gestureSince < 250) return;
+  if (step === 1) {
+    practiceReverse = reverse;
+  } else if (practiceReverse !== null) {
+    $('reverse-tilt').checked = practiceReverse;
+    settings.set('reverse-v2', String(practiceReverse));
+  }
+  trialAction(gesture);
+}
 async function calibrate(){const result=await motionPermission();$('trial-sensor').textContent=result; if(state.sensorOK&&state.angle!==null){state.neutral=state.angle;trialStep(1)}else{$('trial-sensor').textContent=result+' · If no angle is detected, use practice buttons.';setTimeout(()=>{if(state.phase==='tutorial'&&state.trialStep===0&&state.angle!==null){state.neutral=state.angle;trialStep(1)}},500)}}
 function trialStep(step){state.trialStep=step;state.armed=false;state.gestureDir=null;$('trial-manual').classList.toggle('hidden',step===0);$('trial-main').classList.toggle('hidden',step!==0);$('trial-fallback').classList.toggle('hidden',step!==0);const rows=[['STEP 1 OF 3 · CALIBRATE','Hold your phone steady','Hold the phone in landscape at your forehead. Tap Calibrate.','READY?'],['STEP 2 OF 3 · CORRECT','Practice Correct','Tilt the phone UP, then return to neutral.','MOSES'],['STEP 3 OF 3 · PASS','Practice Pass','Tilt the phone DOWN, then return to neutral.','JERICHO'],['READY TO PLAY','You did it!','Both movements are understood. Start your Bible Henyo round!','✓ READY']];const [label,title,desc,word]=rows[step];$('trial-step').textContent=label;$('trial-title').textContent=title;$('trial-desc').textContent=desc;$('trial-word').textContent=word;$('trial-sensor').textContent=step===0?'Motion sensor: not yet enabled':step===3?'Two-word tutorial completed':'Wait for neutral, then tilt';state.trialTarget=step===1?'correct':'pass';if(step===3){$('trial-manual').classList.add('hidden');$('trial-main').classList.remove('hidden');$('trial-main').textContent='Start real game';$('trial-main').onclick=()=>beginGame();settings.set('tutorial_done','true')}}
 function trialAction(kind){if(state.trialStep===1&&kind==='correct'){audio();trialStep(2)}else if(state.trialStep===2&&kind==='pass'){audio(440);trialStep(3)}}
-function beginTrial(){state.mode=$('timer-mode').value;state.duration=Number($('duration').value);state.control=$('control-mode').value;setWords();state.trial=true;show('tutorial');trialStep(0);$('trial-main').textContent='Enable motion & calibrate';$('trial-main').onclick=calibrate;tryFullscreenAndLandscape();}
+function beginTrial(){practiceReverse=null;state.neutral=null;state.mode=$('timer-mode').value;state.duration=Number($('duration').value);state.control=$('control-mode').value;setWords();state.trial=true;show('tutorial');trialStep(0);$('trial-main').textContent='Enable motion & calibrate';$('trial-main').onclick=calibrate;tryFullscreenAndLandscape();}
 function startRequested(){state.mode=$('timer-mode').value;state.duration=Number($('duration').value);state.control=$('control-mode').value;setWords();if($('trial-toggle').checked&&settings.get('tutorial_done','false')!=='true')beginTrial();else beginGame()}
 async function tryFullscreenAndLandscape(){try{if(document.documentElement.requestFullscreen&& !document.fullscreenElement)await document.documentElement.requestFullscreen()}catch{}try{if(screen.orientation?.lock)await screen.orientation.lock('landscape')}catch{} }
-function beginGame(){state.trial=false;state.correct=0;state.passed=0;state.used=[];state.lastAction=0;state.paused=false;state.armed=false;state.neutral=state.angle;state.remaining=state.duration*1000;state.deadline=Date.now()+state.remaining;$('correct-score').textContent='0';$('pass-score').textContent='0';$('game-feedback').textContent='';$('pause-mask').classList.add('hidden');$('game').classList.toggle('touch-mode',state.control==='touch');$('game').classList.toggle('remote-mode',state.control==='remote');$('game-subtitle').textContent=state.control==='remote'?'HOST CONNECTED GAME':'BIBLE WORD';show('game');nextWord();tryFullscreenAndLandscape();if(state.control==='tilt'&&!state.sensorOK){
+function beginGame(){if(!state.trial||state.neutral===null||!state.sensorOK)state.neutral=state.angle;state.trial=false;state.correct=0;state.passed=0;state.used=[];state.lastAction=0;state.paused=false;state.armed=false;state.remaining=state.duration*1000;state.deadline=Date.now()+state.remaining;$('correct-score').textContent='0';$('pass-score').textContent='0';$('game-feedback').textContent='';$('pause-mask').classList.add('hidden');$('game').classList.toggle('touch-mode',state.control==='touch');$('game').classList.toggle('remote-mode',state.control==='remote');$('game-subtitle').textContent=state.control==='remote'?'HOST CONNECTED GAME':'BIBLE WORD';show('game');nextWord();tryFullscreenAndLandscape();if(state.control==='tilt'&&!state.sensorOK){
   msg('HOLD STEADY TO CALIBRATE');
   motionPermission();
   setTimeout(()=>{
@@ -63,5 +113,5 @@ function roomCode(){return Array.from(crypto.getRandomValues(new Uint8Array(4)),
 async function joinRoom(code,role){try{const c=await client();state.remoteRole=role;state.remoteCode=code;state.channel=c.channel('bible-henyo-'+code,{config:{broadcast:{ack:true,self:false}}});state.channel.on('broadcast',{event:'command'},({payload})=>{if(state.remoteRole==='player'){if(payload?.action==='correct'||payload?.action==='pass')transition(payload.action,'remote');else if(payload?.action==='sync')broadcastState()}});state.channel.on('broadcast',{event:'state'},({payload})=>{if(state.remoteRole==='host'){ $('remote-word').textContent=payload.done?'Round complete':payload.word;$('remote-timer').textContent=payload.timer;$('remote-score').textContent='Correct '+payload.correct+' · Passed '+payload.passed;$('remote-status').textContent=payload.done?'Game finished':'Connected to player'}});state.channel.subscribe(status=>{state.remoteConnected=status==='SUBSCRIBED';if(state.remoteConnected){if(role==='host'){send('command',{action:'sync'});$('remote-status').textContent='Connected; requesting game state…'}else broadcastState()}else if(status==='CHANNEL_ERROR'){$('remote-status').textContent='Connection error — check project settings'}})}catch(e){if(role==='host')$('remote-status').textContent=e.message;else alert('Remote connection unavailable: '+e.message+'\nTouch controls remain available.')}}
 async function setupRemoteGame(){let code=state.remoteCode;if(!code){code=roomCode();state.remoteCode=code}const url=new URL(location.href);url.searchParams.set('host',code);$('game-subtitle').textContent='HOST ROOM '+code+' · Share code or link';$('game-feedback').textContent='Host link: '+url.href;await joinRoom(code,'player')}
 function cleanupRemote(){if(state.channel){try{state.channel.unsubscribe()}catch{}state.channel=null}state.remoteConnected=false;state.remoteRole=null;state.remoteCode=null;supabaseClient=null}
-function init(){ $('bank-count').textContent=TERMS.length.toLocaleString()+' starter words';$('library-stat').textContent=TERMS.length.toLocaleString()+' distinct one-word entries bundled (starter collection; 10,000 is the expansion target).';$('start-btn').onclick=startRequested;$('trial-btn').onclick=beginTrial;$('skip-trial').onclick=()=>{settings.set('tutorial_done','true');if(state.trial)beginGame();else exit()};$('trial-fallback').onclick=()=>{state.neutral=0;state.sensorOK=false;trialStep(1)};$('trial-correct').onclick=()=>trialAction('correct');$('trial-pass').onclick=()=>trialAction('pass');$('game-exit').onclick=exit;$('game-pause').onclick=pause;$('resume-btn').onclick=pause;$('touch-correct').onclick=()=>transition('correct');$('touch-pass').onclick=()=>transition('pass');$('play-again').onclick=()=>{setWords();beginGame()};$('back-home').onclick=exit;$('threshold').value=settings.get('threshold','28');$('threshold-label').textContent=$('threshold').value;$('threshold').oninput=e=>{$('threshold-label').textContent=e.target.value;settings.set('threshold',e.target.value)};$('reverse-tilt').checked=settings.get('reverse','false')==='true';$('reverse-tilt').onchange=e=>settings.set('reverse',String(e.target.checked));$('timer-mode').onchange=()=>{$('duration').value=$('timer-mode').value==='word'?'30':'120'};$('reset-history').onclick=()=>{settings.set('wordhistory','[]');alert('Replay history cleared')};$('sb-url').value=settings.get('sb-url','');$('sb-key').value=settings.get('sb-key','');$('save-remote').onclick=()=>{let k=$('sb-key').value.trim();if(/service.role|secret/i.test(k)){alert('Never enter a secret or service-role key');return}settings.set('sb-url',$('sb-url').value.trim());settings.set('sb-key',k);supabaseClient=null;alert('Public realtime settings saved on this device')};$('remote-exit').onclick=exit;$('remote-correct').onclick=()=>send('command',{action:'correct'});$('remote-pass').onclick=()=>send('command',{action:'pass'});$('orientation-continue').onclick=()=>$('orientation').classList.add('hidden');window.addEventListener('resize',()=>{if(state.phase==='game')fitWord()});document.addEventListener('visibilitychange',()=>{if(document.hidden&&state.phase==='game'&&!state.paused)pause()});const host=new URL(location.href).searchParams.get('host');if(host&&/^[A-Z0-9]{6}$/i.test(host)){show('remote');joinRoom(host.toUpperCase(),'host')}if('serviceWorker'in navigator&&location.protocol==='https:')navigator.serviceWorker.register('sw.js').catch(()=>{});}
+function init(){ $('bank-count').textContent=TERMS.length.toLocaleString()+' starter words';$('library-stat').textContent=TERMS.length.toLocaleString()+' distinct one-word entries bundled (starter collection; 10,000 is the expansion target).';$('start-btn').onclick=startRequested;$('trial-btn').onclick=beginTrial;$('skip-trial').onclick=()=>{settings.set('tutorial_done','true');if(state.trial)beginGame();else exit()};$('trial-fallback').onclick=()=>{state.neutral=null;state.sensorOK=false;trialStep(1)};$('trial-correct').onclick=()=>trialAction('correct');$('trial-pass').onclick=()=>trialAction('pass');$('game-exit').onclick=exit;$('game-pause').onclick=pause;$('resume-btn').onclick=pause;$('touch-correct').onclick=()=>transition('correct');$('touch-pass').onclick=()=>transition('pass');$('play-again').onclick=()=>{setWords();beginGame()};$('back-home').onclick=exit;$('threshold').value=settings.get('threshold','28');$('threshold-label').textContent=$('threshold').value;$('threshold').oninput=e=>{$('threshold-label').textContent=e.target.value;settings.set('threshold',e.target.value)};$('reverse-tilt').checked=settings.get('reverse-v2','false')==='true';$('reverse-tilt').onchange=e=>settings.set('reverse-v2',String(e.target.checked));$('timer-mode').onchange=()=>{$('duration').value=$('timer-mode').value==='word'?'30':'120'};$('reset-history').onclick=()=>{settings.set('wordhistory','[]');alert('Replay history cleared')};$('sb-url').value=settings.get('sb-url','');$('sb-key').value=settings.get('sb-key','');$('save-remote').onclick=()=>{let k=$('sb-key').value.trim();if(/service.role|secret/i.test(k)){alert('Never enter a secret or service-role key');return}settings.set('sb-url',$('sb-url').value.trim());settings.set('sb-key',k);supabaseClient=null;alert('Public realtime settings saved on this device')};$('remote-exit').onclick=exit;$('remote-correct').onclick=()=>send('command',{action:'correct'});$('remote-pass').onclick=()=>send('command',{action:'pass'});$('orientation-continue').onclick=()=>$('orientation').classList.add('hidden');window.addEventListener('resize',()=>{if(state.phase==='game')fitWord()});document.addEventListener('visibilitychange',()=>{if(document.hidden&&state.phase==='game'&&!state.paused)pause()});const host=new URL(location.href).searchParams.get('host');if(host&&/^[A-Z0-9]{6}$/i.test(host)){show('remote');joinRoom(host.toUpperCase(),'host')}if('serviceWorker'in navigator&&location.protocol==='https:')navigator.serviceWorker.register('sw.js').catch(()=>{});}
 init();

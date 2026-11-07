@@ -1,9 +1,9 @@
-const cacheName = 'bible-henyo-v2';
+const cacheName = 'bible-henyo-v3';
 const assets = ['./', './index.html', './style.css', './app.js', './words.js',
   './manifest.webmanifest', './icon.svg', './icon.png', './icon-512.png',
   './Bible-Henyo-Word-List.pdf'];
 self.addEventListener('install', event => {
-  event.waitUntil(caches.open(cacheName).then(cache => cache.addAll(assets)).then(() => self.skipWaiting()));
+  event.waitUntil(caches.open(cacheName).then(cache => cache.addAll(assets.map(path => new Request(path, {cache: 'reload'})))).then(() => self.skipWaiting()));
 });
 self.addEventListener('activate', event => {
   event.waitUntil(caches.keys().then(keys => Promise.all(keys
